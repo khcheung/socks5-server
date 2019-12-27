@@ -141,7 +141,7 @@ namespace Socks5
                                     }
                                     break;
                                 case Socks5State.Connected:
-                                    await this.mTcpConnection.SendAsync(buffer.Take(count).ToArray());
+                                    await this.mTcpConnection.SendAsync(buffer, 0, count);
                                     break;
                                 default:
                                     break;
@@ -223,7 +223,12 @@ namespace Socks5
 
         public async Task SendAsync(byte[] buffer)
         {
-            await this.mStream.WriteAsync(buffer, 0, buffer.Length);
+            await this.SendAsync(buffer, 0, buffer.Length);
+        }
+
+        public async Task SendAsync(byte[] buffer, int offset, int length)
+        {
+            await this.mStream.WriteAsync(buffer, offset, length);
         }
     }
 }

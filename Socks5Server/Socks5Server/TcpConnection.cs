@@ -72,7 +72,12 @@ namespace Socks5
 
         public async Task SendAsync(Byte[] buffer)
         {
-            await this.mStream.WriteAsync(buffer, 0, buffer.Length);
+            await this.SendAsync(buffer, 0, buffer.Length);
+        }
+
+        public async Task SendAsync(Byte[] buffer, Int32 offset, Int32 length)
+        {
+            await this.mStream.WriteAsync(buffer, offset, length);
         }
 
         private void Receive()
@@ -93,7 +98,7 @@ namespace Socks5
                         }
                         else
                         {
-                            await mPartner.SendAsync(buffer.Take(count).ToArray());
+                            await mPartner.SendAsync(buffer, 0, count);
                         }
                     }
                 }
