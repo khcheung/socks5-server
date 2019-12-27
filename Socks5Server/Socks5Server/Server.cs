@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 
@@ -14,6 +15,7 @@ namespace Socks5
         private TcpListener mTcpListener;
         private ConcurrentDictionary<Int32, Socks5Handler> mConnections;
         private Int32 mConnectionId = 0;
+        private Boolean mRequireTLS = false;
 
         /// <summary>
         /// Socks5 Server on Address and Port
@@ -24,6 +26,13 @@ namespace Socks5
         {
             this.mListenIp = listenIp;
             this.mPort = port;
+        }
+
+        public Server RequireTLS()
+        {
+            throw new NotImplementedException();
+            //this.mRequireTLS = true;
+            //return this;
         }
 
         public void StartListen()
@@ -51,15 +60,26 @@ namespace Socks5
                     try
                     {
                         var tcpClient = await mTcpListener.AcceptTcpClientAsync();
-                        Socks5Handler socks5Handler = new Socks5Handler(mConnectionId++, tcpClient);
+                        Socks5Handler socks5Handler = null;
+                        if (this.mRequireTLS)
+                        {
+                            var networkStream = tcpClient.GetStream();                            
+                            var sslStream = new SslStream(networkStream);
+                            //sslStream.AuthenticateAsServer(null);
+                            socks5Handler = new Socks5Handler(mConnectionId++, sslStream);
+                        }
+                        else
+                        {
+                            socks5Handler = new Socks5Handler(mConnectionId++, tcpClient);
+                        }
                         socks5Handler.ConnectionClosed += Socks5Handler_ConnectionClosed;                        
                         this.mConnections.TryAdd(socks5Handler.ConnectionId, socks5Handler);
-                        System.Console.WriteLine($"Connection Count: {this.mConnections.Count}");                    
+                        //System.Console.WriteLine($"Connection Count: {this.mConnections.Count}");                    
                         socks5Handler.Start();
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-
+                        System.Console.WriteLine(ex.Message);
                     }
                 }
             });
@@ -69,7 +89,7 @@ namespace Socks5
         {
             Socks5Handler socks5Handler;
             this.mConnections.TryRemove((sender as Socks5Handler).ConnectionId, out socks5Handler);
-            System.Console.WriteLine($"Connection Count: {this.mConnections.Count}");
+            //System.Console.WriteLine($"Connection Count: {this.mConnections.Count}");
         }
 
         public void StopListen()

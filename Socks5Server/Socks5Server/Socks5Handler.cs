@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Socks5.Message;
+using Socks5.Socks5Enum;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,25 +12,24 @@ using System.Threading.Tasks;
 
 namespace Socks5
 {
-    public class Socks5Handler
+    public class Socks5Handler : IConnection
     {
-        public Int32 ConnectionId { get; private set; }
+        
         public event EventHandler<EventArgs> ConnectionClosed;
+
+        public Int32 ConnectionId { get; private set; }
         private TcpClient mTcpClient;
         private Stream mStream;
         private Socks5State mState;
+        private Boolean mIsClosed = false;
 
-        private Task mTaskReceive;
-        private TcpClient mDestClient;
-        private Task mTaskDest;
-        private Stream mDestStream;
+        private TcpConnection mTcpConnection;        
 
         public Socks5Handler(Int32 connectionId, TcpClient tcpClient)
         {
             this.ConnectionId = connectionId;
             this.mTcpClient = tcpClient;
             this.mStream = tcpClient.GetStream();
-
         }
 
         public Socks5Handler(Int32 connectionId, Stream stream)
@@ -52,13 +53,10 @@ namespace Socks5
                         if (count == 0)
                         {
                             isClose = true;
-                            mDestStream?.Close();
-                            //System.Console.WriteLine($"{this.ConnectionId} - CLIENT CLOSE");
                         }
                         else
                         {
-                            //System.Console.WriteLine(String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray()));
-
+                            //System.Console.WriteLine(String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray()));                            
                             switch (this.mState)
                             {
                                 case Socks5State.Connect:
@@ -86,7 +84,7 @@ namespace Socks5
                                     {
                                         Int32 position = 0;
                                         Byte version = buffer[0];
-                                        Byte command = buffer[1];
+                                        Command command = (Command)buffer[1];
                                         Byte reserved = buffer[2];
                                         AddressType addressType = (AddressType)buffer[3];
                                         IPAddress address = null;
@@ -98,56 +96,61 @@ namespace Socks5
                                             mStream.Close();
                                             isClose = true;
                                         }
-
-                                        switch (addressType)
+                                        else
                                         {
-                                            case AddressType.IPV4:
-                                                address = new IPAddress(buffer.Skip(4).Take(4).ToArray());
-                                                destAddress = address.ToString();
-                                                position = 8;
-                                                break;
-                                            case AddressType.IPV6:
-                                                address = new IPAddress(buffer.Skip(4).Take(16).ToArray());
-                                                destAddress = address.ToString();
-                                                position = 8;
-                                                break;
-                                            case AddressType.DomainName:
-                                                byte length = buffer[4];
-                                                destAddress = System.Text.Encoding.ASCII.GetString(buffer.Skip(5).Take((Int32)length).ToArray());
-                                                position = 5 + length;
-                                                break;
-                                        }
 
-                                        Int32 destPort = (buffer[position] << 8) + buffer[position + 1];
-                                        //System.Console.WriteLine($"Connect - {destAddress}:{destPort} - {String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray())}");
-                                        await Connect(destAddress, destPort);
+                                            switch (addressType)
+                                            {
+                                                case AddressType.IPV4:
+                                                    address = new IPAddress(buffer.Skip(4).Take(4).ToArray());
+                                                    destAddress = address.ToString();
+                                                    position = 8;
+                                                    break;
+                                                case AddressType.IPV6:
+                                                    address = new IPAddress(buffer.Skip(4).Take(16).ToArray());
+                                                    destAddress = address.ToString();
+                                                    position = 8;
+                                                    break;
+                                                case AddressType.DomainName:
+                                                    byte length = buffer[4];
+                                                    destAddress = System.Text.Encoding.ASCII.GetString(buffer.Skip(5).Take((Int32)length).ToArray());
+                                                    position = 5 + length;
+                                                    break;
+                                            }
+
+                                            Int32 destPort = (buffer[position] << 8) + buffer[position + 1];
+
+                                            switch(command)
+                                            {
+                                                case Command.Connect:
+                                                    await Connect(destAddress, destPort);
+                                                    break;
+                                                case Command.Bind:
+                                                    System.Console.WriteLine("Command BIND - Not Implemented");
+                                                    isClose = true;
+                                                    break;
+                                                case Command.UDPAssociate:
+                                                    System.Console.WriteLine("Command UDP Associate - Not Implemented");
+                                                    isClose = true;
+                                                    break;
+                                            }
+                                            
+                                        }
 
                                     }
                                     break;
                                 case Socks5State.Connected:
-                                    //System.Console.WriteLine(System.Text.Encoding.UTF8.GetString(buffer, 0, count));
-                                    await mDestStream.WriteAsync(buffer, 0, count);
-                                    //await mDestStream.FlushAsync();
-                                    //System.Console.WriteLine($"SEND COUNT - {count}");
-
+                                    await this.mTcpConnection.SendAsync(buffer.Take(count).ToArray());
                                     break;
                                 default:
                                     break;
                             }
-
-                            //mStream.Close();
-                            //isClose = true;
                         }
                     }
                 }
-                catch (Exception)
-                {
-                    isClose = true;
-                    mDestStream.Close();                   
-                }
-                mStream.Close();
-                mTcpClient?.Close();
-                //System.Console.WriteLine($"{this.ConnectionId} - CLIENT CLOSE");
+                catch (Exception) { }
+                mTcpConnection.Close();
+                this.Close();
                 ConnectionClosed?.Invoke(this, new EventArgs());
             });
         }
@@ -161,56 +164,41 @@ namespace Socks5
         {
             try
             {
-                this.mDestClient = new TcpClient();
-                await this.mDestClient.ConnectAsync(destAddress, destPort);
-                this.mDestStream = this.mDestClient.GetStream();
-                switch (this.mDestClient.Client.LocalEndPoint.AddressFamily)
-                {
-                    case AddressFamily.InterNetwork:
-                    case AddressFamily.InterNetworkV6:
-                        var ipEndPoint = this.mDestClient.Client.LocalEndPoint as IPEndPoint;
-                        var ipAddress = ipEndPoint.Address.MapToIPv4();
-                        //System.Console.WriteLine($"Local EndPoint - {ipEndPoint.AddressFamily} - {ipEndPoint.Address.MapToIPv4().ToString()}");
-                        await ReplyConnected(ipAddress.AddressFamily, ipAddress.GetAddressBytes(), ipEndPoint.Port);
-                        break;
-                }
-
-                this.mState = Socks5State.Connected;
-
-                mTaskDest = Task.Factory.StartNew(async () =>
-                {
-                    var buffer = new Byte[65535];
-                    var count = 0;
-                    var isClose = false;
-                    try
-                    {
-                        while (!isClose)
-                        {
-                            count = await mDestStream.ReadAsync(buffer, 0, buffer.Length);
-                            if (count == 0)
-                            {
-                                isClose = true;
-                                mStream.Close();
-                               
-                            }
-                            await this.mStream.WriteAsync(buffer, 0, count);
-                            //System.Console.WriteLine($"RECEIVE COUNT - {count}");
-                        }
-                    } catch (Exception)
-                    {                        
-                        mStream.Close();
-                    }
-                    mDestStream.Close();
-                    mDestClient.Close();
-                    //System.Console.WriteLine($"{this.ConnectionId} - DEST CLOSE");
-
-                });
-
+                this.mTcpConnection = new TcpConnection(this.ConnectionId, this, destAddress, destPort);
+                mTcpConnection.Connected += TcpConnection_Connected;                
+                mTcpConnection.Closed += TcpConnection_Closed;
+                await mTcpConnection.Connect();
             }
             catch (Exception) { }
         }
 
+        private void Close()
+        {
+            if (!mIsClosed)
+            {
+                mIsClosed = true;
+                mStream?.Close();
+                mStream?.Dispose();
+                mStream = null;
+                mTcpClient?.Close();
+                mTcpClient?.Dispose();
+                mTcpClient = null;
+            }
+        }
 
+        private void TcpConnection_Closed(object sender, EventArgs e)
+        {
+            this.Close();
+        } 
+
+        private void TcpConnection_Connected(object sender, ConnectedEventArgs e)
+        {
+            this.mState = Socks5State.Connected;
+            Task.Run(async () =>
+            {
+                await this.ReplyConnected(e.AddressFamily, e.Address, e.Port);
+            });
+        }
 
         private async Task ReplyConnected(AddressFamily addressFamily, Byte[] address, Int32 port)
         {
@@ -231,65 +219,10 @@ namespace Socks5
             await mStream.WriteAsync(reply.ToArray(), 0, reply.Count);
             //System.Console.WriteLine($"Reply - {String.Concat(reply.Select(p => p.ToString("X2")).ToArray())}");
         }
-    }
 
-    internal enum Socks5State
-    {
-        Connect,
-        Authenticated,
-        Connected
-    }
-
-
-
-    /// <summary>
-    /// RFC 1928
-    /// Page 3 - METHOD
-    /// </summary>
-    public enum Method : byte
-    {
-        NoAuthenticationRequired = 0,
-        GSSAPI = 1,
-        UsernamePassword = 2
-    }
-
-    /// <summary>
-    /// RFC 1928
-    /// Page 4 - 4. Requests
-    /// </summary>
-    public enum Command : byte
-    {
-        Connect = 1,
-        Bind = 2,
-        UDPAssociate = 3
-    }
-
-    /// <summary>
-    /// RFC 1928
-    /// Page 4 - 4. Requests
-    /// Page 6 - 6. Replies
-    /// </summary>
-    public enum AddressType : byte
-    {
-        IPV4 = 1,
-        DomainName = 3,
-        IPV6 = 4
-    }
-
-    /// <summary>
-    /// RFC 1928
-    /// Page 5 - 6. Replies
-    /// </summary>
-    public enum Reply : byte
-    {
-        Succeeded = 0,
-        ServerFailure = 1,
-        ConnectionNotAllowed = 2,
-        NetworkUnreachable = 3,
-        HostUnreachable = 4,
-        ConnectionRefused = 5,
-        TTLExpired = 6,
-        CommandNotSupported = 7,
-        AddressTypeNotSupported = 8
+        public async Task SendAsync(byte[] buffer)
+        {
+            await this.mStream.WriteAsync(buffer, 0, buffer.Length);
+        }
     }
 }
