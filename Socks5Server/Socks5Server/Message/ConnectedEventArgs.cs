@@ -5,7 +5,7 @@ using System.Text;
 
 namespace Socks5.Message
 {
-    internal class ConnectedEventArgs : EventArgs
+    public class ConnectedEventArgs : EventArgs
     {
         public AddressFamily AddressFamily { get; set; }
         public Byte[] Address { get; set; }

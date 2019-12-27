@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Socks5.Interface;
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
@@ -19,6 +20,7 @@ namespace Socks5
         private Boolean mRequireAuthentication = false;
         private Func<String, String, Boolean> mAuthenticate = null;
         private Byte[] mCert = null;
+        private IConnectionFactory mConnectionFactory = null;
 
         /// <summary>
         /// Socks5 Server on Address and Port
@@ -45,8 +47,19 @@ namespace Socks5
             return this;
         }
 
+        public Server WithConnectionFactory(IConnectionFactory connectionFactory)
+        {
+            this.mConnectionFactory = connectionFactory;
+            return this;
+        }
+
         public void StartListen()
         {
+            if (this.mConnectionFactory == null)
+            {
+                this.mConnectionFactory = new LocalConnectionFactory();
+            }
+
             if (mTcpListener == null)
             {
                 mTcpListener = new TcpListener(mListenIp, mPort);
@@ -86,6 +99,8 @@ namespace Socks5
                         {
                             socks5Handler = new Socks5Handler(mConnectionId++, tcpClient);
                         }
+
+                        socks5Handler.WithConnectionFactory(this.mConnectionFactory);
 
                         if (mRequireAuthentication)
                         {

@@ -1,4 +1,5 @@
-﻿using Socks5.Message;
+﻿using Socks5.Interface;
+using Socks5.Message;
 using Socks5.Socks5Enum;
 using System;
 using System.Collections.Generic;
@@ -28,7 +29,8 @@ namespace Socks5
         private Byte mVersion = 5;
         private Method mAllowedMethod = Method.NoAuthenticationRequired;
 
-        private TcpConnection mTcpConnection;
+        private IPeerConnection mPeerConnection;
+        private IConnectionFactory mConnectionFactory = null;
 
         public Socks5Handler(Int32 connectionId, TcpClient tcpClient)
         {
@@ -48,6 +50,12 @@ namespace Socks5
             this.mRequireAuthentication = true;
             this.mAuthenticate = authenticate;
             this.mAllowedMethod = Method.UsernamePassword;
+            return this;
+        }
+
+        public Socks5Handler WithConnectionFactory(IConnectionFactory connectionFactory)
+        {
+            this.mConnectionFactory = connectionFactory;
             return this;
         }
 
@@ -212,7 +220,7 @@ namespace Socks5
                                     }
                                     break;
                                 case Socks5State.Connected:
-                                    await this.mTcpConnection.SendAsync(buffer, 0, count);
+                                    await this.mPeerConnection.SendAsync(buffer, 0, count);
                                     break;
                                 default:
                                     break;
@@ -221,7 +229,7 @@ namespace Socks5
                     }
                 }
                 catch (Exception) { }
-                mTcpConnection.Close();
+                mPeerConnection.Close();
                 this.Close();
                 ConnectionClosed?.Invoke(this, new EventArgs());
             });
@@ -241,15 +249,16 @@ namespace Socks5
         {
             try
             {
-                this.mTcpConnection = new TcpConnection(this.ConnectionId, this, destAddress, destPort);
-                mTcpConnection.Connected += TcpConnection_Connected;
-                mTcpConnection.Closed += TcpConnection_Closed;
-                await mTcpConnection.Connect();
+                this.mPeerConnection = this.mConnectionFactory.AcquireConnection(this.ConnectionId, this, destAddress, destPort);
+                //this.mTcpConnection = new TcpConnection(this.ConnectionId, this, destAddress, destPort);
+                mPeerConnection.Connected += TcpConnection_Connected;
+                mPeerConnection.Closed += TcpConnection_Closed;
+                await mPeerConnection.Connect();
             }
             catch (Exception) { }
         }
 
-        private void Close()
+        public void Close()
         {
             if (!mIsClosed)
             {

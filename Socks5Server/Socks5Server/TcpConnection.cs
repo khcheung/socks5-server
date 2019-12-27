@@ -1,4 +1,5 @@
-﻿using Socks5.Message;
+﻿using Socks5.Interface;
+using Socks5.Message;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace Socks5
 {
-    internal class TcpConnection : IConnection
+    public class TcpConnection : IPeerConnection
     {
         private Int32 mConnectionId = 0;
         private TcpClient mTcpClient = null;

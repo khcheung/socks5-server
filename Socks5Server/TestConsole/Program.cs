@@ -54,6 +54,10 @@ ufaiAEtMzqRFVsac+0Nr9KHHZrOIPonwgygVOBGXfKWfgz/gjz9RKOmLd3D5vfXeMSUwIwYJKoZI
 hvcNAQkVMRYEFKOOhXMZSwazNaU95wk9qOghIDSzMDEwITAJBgUrDgMCGgUABBQ+b+SUsmf+S+QW
 xOXdqZUZXRqUbQQIlVKwePW8g3MCAggA";
 
+            Edge.EdgeServer edge = new Edge.EdgeServer(IPAddress.Any, 2080);
+            edge.StartListen();
+
+
             Socks5.Server server = new Socks5.Server(IPAddress.Any, 1080)
                 .WithAuthentication((username, password) =>
                 {
@@ -63,9 +67,12 @@ xOXdqZUZXRqUbQQIlVKwePW8g3MCAggA";
                     }
                     return false;
                 })
+                .WithConnectionFactory(edge)
                 .RequireTLS(Convert.FromBase64String(cert));              
-            
             server.StartListen();
+
+
+
             Console.WriteLine("Started");
             Console.ReadKey();
         }
