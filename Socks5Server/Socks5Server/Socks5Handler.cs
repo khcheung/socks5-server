@@ -14,7 +14,7 @@ namespace Socks5
 {
     public class Socks5Handler : IConnection
     {
-        
+
         public event EventHandler<EventArgs> ConnectionClosed;
 
         public Int32 ConnectionId { get; private set; }
@@ -23,8 +23,12 @@ namespace Socks5
         private Socks5State mState;
         private Boolean mIsClosed = false;
         private Task mTaskReceive = null;
+        private Boolean mRequireAuthentication = false;
+        private Func<String, String, Boolean> mAuthenticate = null;
+        private Byte mVersion = 5;
+        private Method mAllowedMethod = Method.NoAuthenticationRequired;
 
-        private TcpConnection mTcpConnection;        
+        private TcpConnection mTcpConnection;
 
         public Socks5Handler(Int32 connectionId, TcpClient tcpClient)
         {
@@ -37,6 +41,14 @@ namespace Socks5
         {
             this.ConnectionId = connectionId;
             this.mStream = stream;
+        }
+
+        public Socks5Handler WithAuthentication(Func<String, String, Boolean> authenticate)
+        {
+            this.mRequireAuthentication = true;
+            this.mAuthenticate = authenticate;
+            this.mAllowedMethod = Method.UsernamePassword;
+            return this;
         }
 
         public void Start()
@@ -57,28 +69,87 @@ namespace Socks5
                         }
                         else
                         {
-                            //System.Console.WriteLine(String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray()));                            
+                            System.Console.WriteLine(String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray()));
                             switch (this.mState)
                             {
                                 case Socks5State.Connect:
                                     {
                                         Byte version = buffer[0];
                                         Byte noOfMethods = buffer[1];
-                                        Byte method = buffer[2];
+                                        List<Method> methods = new List<Method>();
+                                        for (int i = 0; i < noOfMethods; i++)
+                                        {
+                                            methods.Add((Method)buffer[i + 2]);
+                                        }
 
-                                        if (version != 5)
+                                        if (version != mVersion)
                                         {
                                             System.Console.WriteLine("Invalid Socks Version");
                                             mStream.Close();
                                             isClose = true;
                                         }
 
-                                        if (method == 0)
-                                        {
-                                            await ReplyConnect();
-                                            this.mState = Socks5State.Authenticated;
-                                        }
 
+                                        if (methods.Contains(mAllowedMethod))
+                                        {
+                                            switch (mAllowedMethod)
+                                            {
+                                                case Method.NoAuthenticationRequired:
+                                                    await ReplyConnect(Method.NoAuthenticationRequired);
+                                                    this.mState = Socks5State.Authenticated;
+                                                    break;
+                                                case Method.UsernamePassword:
+                                                    await ReplyConnect(Method.UsernamePassword);
+                                                    this.mState = Socks5State.Authenticating;
+                                                    break;
+                                                case Method.GSSAPI:
+                                                    System.Console.WriteLine("Not Implemented GSSAPI");
+                                                    isClose = true;
+                                                    break;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            await ReplyConnect(Method.NoAcceptableMethod);
+                                            isClose = true;
+                                        }
+                                    }
+                                    break;
+                                case Socks5State.Authenticating:
+                                    {
+                                        switch (this.mAllowedMethod)
+                                        {
+                                            case Method.UsernamePassword:
+                                                Byte subVersion = buffer[0];
+                                                if (subVersion == 1)
+                                                {
+                                                    Int32 usernameLength = buffer[1];
+                                                    String username = System.Text.Encoding.ASCII.GetString(buffer, 2, usernameLength);
+                                                    Int32 passwordLength = buffer[1 + usernameLength + 1];
+                                                    String password = System.Text.Encoding.ASCII.GetString(buffer, 3 + usernameLength, passwordLength);
+                                                    var authResult = mAuthenticate(username, password);
+                                                    if (authResult)
+                                                    {
+                                                        await ReplyAuthentication(0);
+                                                        this.mState = Socks5State.Authenticated;
+                                                    }
+                                                    else
+                                                    {
+                                                        await ReplyAuthentication(255);
+                                                        isClose = true;
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    // Unknown Username/Password Version
+                                                    isClose = true;
+                                                }
+                                                break;
+                                            case Method.GSSAPI:
+                                                System.Console.WriteLine("Not Implemented GSSAPI");
+                                                isClose = true;
+                                                break;
+                                        }
                                     }
                                     break;
                                 case Socks5State.Authenticated:
@@ -91,7 +162,7 @@ namespace Socks5
                                         IPAddress address = null;
                                         String destAddress = "";
 
-                                        if (version != 5)
+                                        if (version != mVersion)
                                         {
                                             System.Console.WriteLine("Invalid Socks Version");
                                             mStream.Close();
@@ -121,7 +192,7 @@ namespace Socks5
 
                                             Int32 destPort = (buffer[position] << 8) + buffer[position + 1];
 
-                                            switch(command)
+                                            switch (command)
                                             {
                                                 case Command.Connect:
                                                     await Connect(destAddress, destPort);
@@ -135,7 +206,7 @@ namespace Socks5
                                                     isClose = true;
                                                     break;
                                             }
-                                            
+
                                         }
 
                                     }
@@ -156,9 +227,14 @@ namespace Socks5
             });
         }
 
-        private async Task ReplyConnect()
+        private async Task ReplyConnect(Method result)
         {
-            await mStream.WriteAsync(new byte[] { 5, 0 }, 0, 2);
+            await mStream.WriteAsync(new byte[] { mVersion, (Byte)result }, 0, 2);
+        }
+
+        private async Task ReplyAuthentication(Byte status)
+        {
+            await mStream.WriteAsync(new byte[] { 1, (Byte)status }, 0, 2);
         }
 
         private async Task Connect(String destAddress, Int32 destPort)
@@ -166,7 +242,7 @@ namespace Socks5
             try
             {
                 this.mTcpConnection = new TcpConnection(this.ConnectionId, this, destAddress, destPort);
-                mTcpConnection.Connected += TcpConnection_Connected;                
+                mTcpConnection.Connected += TcpConnection_Connected;
                 mTcpConnection.Closed += TcpConnection_Closed;
                 await mTcpConnection.Connect();
             }
@@ -190,7 +266,7 @@ namespace Socks5
         private void TcpConnection_Closed(object sender, EventArgs e)
         {
             this.Close();
-        } 
+        }
 
         private void TcpConnection_Connected(object sender, ConnectedEventArgs e)
         {

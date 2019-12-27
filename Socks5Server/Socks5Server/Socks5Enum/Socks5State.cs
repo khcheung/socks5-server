@@ -7,6 +7,7 @@ namespace Socks5.Socks5Enum
     internal enum Socks5State
     {
         Connect,
+        Authenticating,
         Authenticated,
         Connected
     }

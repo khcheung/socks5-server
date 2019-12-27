@@ -12,6 +12,7 @@ namespace Socks5.Socks5Enum
     {
         NoAuthenticationRequired = 0,
         GSSAPI = 1,
-        UsernamePassword = 2
+        UsernamePassword = 2,
+        NoAcceptableMethod = 255
     }
 }

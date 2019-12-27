@@ -16,6 +16,8 @@ namespace Socks5
         private ConcurrentDictionary<Int32, Socks5Handler> mConnections;
         private Int32 mConnectionId = 0;
         private Boolean mRequireTLS = false;
+        private Boolean mRequireAuthentication = false;
+        private Func<String, String, Boolean> mAuthenticate = null;
 
         /// <summary>
         /// Socks5 Server on Address and Port
@@ -33,6 +35,13 @@ namespace Socks5
             throw new NotImplementedException();
             //this.mRequireTLS = true;
             //return this;
+        }
+
+        public Server WithAuthentication(Func<String, String, Boolean> authenticate)
+        {
+            this.mRequireAuthentication = true;
+            this.mAuthenticate = authenticate;
+            return this;
         }
 
         public void StartListen()
@@ -72,6 +81,12 @@ namespace Socks5
                         {
                             socks5Handler = new Socks5Handler(mConnectionId++, tcpClient);
                         }
+
+                        if (mRequireAuthentication)
+                        {
+                            socks5Handler.WithAuthentication(this.mAuthenticate);
+                        }
+
                         socks5Handler.ConnectionClosed += Socks5Handler_ConnectionClosed;                        
                         this.mConnections.TryAdd(socks5Handler.ConnectionId, socks5Handler);
                         //System.Console.WriteLine($"Connection Count: {this.mConnections.Count}");                    
