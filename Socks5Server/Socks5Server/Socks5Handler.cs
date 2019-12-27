@@ -22,6 +22,7 @@ namespace Socks5
         private Stream mStream;
         private Socks5State mState;
         private Boolean mIsClosed = false;
+        private Task mTaskReceive = null;
 
         private TcpConnection mTcpConnection;        
 
