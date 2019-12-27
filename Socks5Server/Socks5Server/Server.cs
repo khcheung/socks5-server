@@ -18,6 +18,7 @@ namespace Socks5
         private Boolean mRequireTLS = false;
         private Boolean mRequireAuthentication = false;
         private Func<String, String, Boolean> mAuthenticate = null;
+        private Byte[] mCert = null;
 
         /// <summary>
         /// Socks5 Server on Address and Port
@@ -30,11 +31,11 @@ namespace Socks5
             this.mPort = port;
         }
 
-        public Server RequireTLS()
-        {
-            throw new NotImplementedException();
-            //this.mRequireTLS = true;
-            //return this;
+        public Server RequireTLS(Byte[] cert)
+        {            
+            this.mRequireTLS = true;
+            this.mCert = cert;
+            return this;
         }
 
         public Server WithAuthentication(Func<String, String, Boolean> authenticate)
@@ -74,7 +75,11 @@ namespace Socks5
                         {
                             var networkStream = tcpClient.GetStream();                            
                             var sslStream = new SslStream(networkStream);
-                            //sslStream.AuthenticateAsServer(null);
+                            sslStream.AuthenticateAsServer(
+                                new System.Security.Cryptography.X509Certificates.X509Certificate(this.mCert), 
+                                false, 
+                                System.Security.Authentication.SslProtocols.Tls, 
+                                false);
                             socks5Handler = new Socks5Handler(mConnectionId++, sslStream);
                         }
                         else

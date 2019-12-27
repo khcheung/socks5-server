@@ -69,7 +69,7 @@ namespace Socks5
                         }
                         else
                         {
-                            System.Console.WriteLine(String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray()));
+                            //System.Console.WriteLine(String.Concat(buffer.Take(count).Select(p => p.ToString("X2")).ToArray()));
                             switch (this.mState)
                             {
                                 case Socks5State.Connect:
